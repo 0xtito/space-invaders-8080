@@ -2,74 +2,130 @@ const std = @import("std");
 const print = std.debug.print;
 
 const d = @import("disassembler.zig");
+const a = @import("assembler_8080.zig");
 
-pub const RomData = [256]u8;
+// NOTE: THis is the max memory size for the 8080
+// May consist of both ROM and RAM
+pub const MemorySize = 0x10000; // 64KB = 65536 bytes
+
+// NOTE: Each invaders file is 0x7f0 bytes long
+// which equates to 2032 bytes
+// Thus, 0x2000 bytes is enough to store each file
+pub const RomSize = 0x2000; // 2KB = 8192 bytes
+
+pub const RomData = [8192]u8;
 pub const RomContent = struct { data: RomData, len: usize };
 
 pub const ConditionCodes = struct { z: bool, s: bool, p: bool, cy: bool, ac: bool, pad: u3 };
 
-pub const State8080 = struct { a: u8, b: u8, c: u8, d: u8, e: u8, h: u8, l: u8, sp: u16, pc: u16, memory: *u8, cc: ConditionCodes, int_enabled: u8 };
+// NOTE: This is the state of the 8080 CPU
+// - a: 8-bit accumulator register
+// - b: 8-bit register
+// - c: 8-bit register
+// - d: 8-bit register
+// - e: 8-bit register
+// - h: 8-bit register
+// - l: 8-bit register
+// - sp: 16-bit stack pointer register
+//      - points to the current stack location
+// - pc: 16-bit program counter register
+// - memory: 64KB memory
+// - cc: condition codes
+// - int_enabled: interrupt enabled flag
+pub const State8080 = struct { a: u8, b: u8, c: u8, d: u8, e: u8, h: u8, l: u8, sp: u16, pc: u16, memory: [MemorySize]u8, cc: ConditionCodes, int_enabled: u8 };
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const allocator = gpa.allocator();
+    _ = allocator;
 
-    const rom = getRom() catch |err| {
-        return err;
-    };
+    var state: State8080 = try initState8080();
 
-    const rom_ptr: *const RomData = &rom.data;
+    print("State initialized.\n", .{});
+    print("Memory size: {d}\n", .{state.memory.len});
+    // defer allocator.free(state.memory);
 
-    // print_rom_data(rom_ptr);
+    try getRom(&state, "invaders.h", 0x0000);
+    try getRom(&state, "invaders.g", 0x0800);
+    try getRom(&state, "invaders.f", 0x1000);
+    try getRom(&state, "invaders.e", 0x1800);
 
-    var pc: u16 = 0;
-    // while (pc < rom.len) {
-    while (pc < rom.len) {
-        pc += try d.deassemblerP(rom_ptr, pc);
-        // if (pc == 3) break;
+    var count: u16 = 0;
+    emulation_loop: while (true) {
+        switch (a.emulate8080P(&state)) {
+            .Continue => {
+                count += 1;
+                continue :emulation_loop;
+            },
+            .Halt => {
+                print("Halted.\n", .{});
+                print("Instructions executed: {d}\n", .{count});
+                break :emulation_loop;
+            },
+            .Unimplemented => {
+                break :emulation_loop;
+            },
+        }
     }
-
-    try bw.flush(); // don't forget to flush!
 }
 
-pub fn getRom() !RomContent {
+pub fn getRom(state: *State8080, file_name: *const [10]u8, offset: u32) !void {
     // Get the current working directory
     const cwd = std.fs.cwd();
 
     var output_dir = try cwd.openDir("src/roms", .{});
     defer output_dir.close();
 
-    const file = try output_dir.openFile("invaders.concatenated", .{});
+    // const file = try output_dir.openFile("invaders.concatenated", .{});
     // const file = try output_dir.openFile("invaders.h", .{});
     // const file = try output_dir.openFile("invaders.g", .{});
+
+    const file = try output_dir.openFile(file_name, .{});
     defer file.close();
 
-    const rom = blk: {
-        var temp: RomData = undefined;
-        const bytes_read = try file.readAll(&temp);
-        if (bytes_read < temp.len) {
-            return error.NotEnoughData;
-        }
-        print("Successfully read {d} bytes from the file.\n", .{bytes_read});
+    var buffer: [2048]u8 = undefined;
+    const bytes_read = try file.readAll(&buffer);
 
-        break :blk RomContent{ .data = temp, .len = bytes_read };
-    };
+    print("Successfully read {d} bytes from the file {s}.\n", .{ bytes_read, file_name });
+    print("File name: {s}\n", .{file_name});
+    print("Memory slot: {d}\n", .{offset});
 
-    return rom;
+    std.mem.copyForwards(u8, state.memory[offset..], buffer[0..bytes_read]);
 }
 
-fn printRomData(data: *const RomContent) void {
+fn printRomData(data: *const RomData) void {
     for (data[0..128]) |byte| {
         print("{x:0>2} ", .{byte});
     }
+}
+
+// pub fn initState8080(allocator: std.mem.Allocator) !State8080 {
+pub fn initState8080() !State8080 {
+    // const memory: []u8 = try allocator.alloc(u8, 0x10000);
+    //
+    // @memset(memory, 0);
+
+    // INFO: Initialize the state of the 8080 CPU
+    // I am purposefully being explicit here regarding the initial values
+    //  being set to their hexadecimal equivalent for educational reasons
+    const state: State8080 = State8080{
+        .a = 0x00,
+        .b = 0x00,
+        .c = 0x00,
+        .d = 0x00,
+        .e = 0x00,
+        .h = 0x00,
+        .l = 0x00,
+        .sp = 0x0000,
+        .pc = 0x0000,
+        .memory = [_]u8{0} ** MemorySize,
+        .cc = ConditionCodes{ .z = false, .s = false, .p = false, .cy = false, .ac = false, .pad = 0 },
+        .int_enabled = 0,
+    };
+
+    return state;
 }
 
 test "simple test" {
