@@ -32,7 +32,7 @@ pub const ConditionCodes = struct { z: bool, s: bool, p: bool, cy: bool, ac: boo
 // - memory: 64KB memory
 // - cc: condition codes
 // - int_enabled: interrupt enabled flag
-pub const State8080 = struct { a: u8, b: u8, c: u8, d: u8, e: u8, h: u8, l: u8, sp: u16, pc: u16, memory: [MemorySize]u8, cc: ConditionCodes, int_enabled: u8 };
+pub const State8080 = struct { a: u8, b: u8, c: u8, d: u8, e: u8, h: u8, l: u8, sp: u16, pc: u16, memory: [MemorySize]u8, cc: ConditionCodes, int_enabled: bool };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -52,7 +52,7 @@ pub fn main() !void {
     try getRom(&state, "invaders.f", 0x1000);
     try getRom(&state, "invaders.e", 0x1800);
 
-    var count: u16 = 0;
+    var count: u32 = 0;
     emulation_loop: while (true) {
         switch (a.emulate8080P(&state)) {
             .Continue => {
@@ -65,6 +65,8 @@ pub fn main() !void {
                 break :emulation_loop;
             },
             .Unimplemented => {
+                print("Unimplemented instruction.\n", .{});
+                print("Instructions executed: {d}\n", .{count});
                 break :emulation_loop;
             },
         }
@@ -122,7 +124,7 @@ pub fn initState8080() !State8080 {
         .pc = 0x0000,
         .memory = [_]u8{0} ** MemorySize,
         .cc = ConditionCodes{ .z = false, .s = false, .p = false, .cy = false, .ac = false, .pad = 0 },
-        .int_enabled = 0,
+        .int_enabled = false,
     };
 
     return state;
