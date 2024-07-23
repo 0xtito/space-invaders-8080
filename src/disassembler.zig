@@ -1,30 +1,42 @@
 const std = @import("std");
 const print = std.debug.print;
 
+const m = @import("main.zig");
+
+const MemorySize = m.MemorySize;
 const RomContent = @import("main.zig").RomContent;
 const RomData = @import("main.zig").RomData;
 
-pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
-    const code: *const u8 = &rom_ptr[pc];
+fn printFlags(state: *const m.State8080) !void {
+    print("Flags: ", .{});
+    print("S: {} | ", .{state.cc.s});
+    print("Z: {} | ", .{state.cc.z});
+    print("AC: {} | ", .{state.cc.ac});
+    print("P: {} | ", .{state.cc.p});
+    print("CY: {}\n", .{state.cc.cy});
+}
+
+// pub fn deassemblerP(state_memory: *const [MemorySize]u8, pc: *const u16) !u16 {
+pub fn deassemblerP(state: *const m.State8080, state_memory: *const [MemorySize]u8, pc: *const u16) !void {
+    const opcode = state_memory[pc.*];
     var op_bytes: u16 = 1;
-    // std.debug.print("---- CALLED ----\n", .{});
-    // std.debug.print("Executing 8080 code at PC: 0x{X:0>4}\n", .{pc});
-    // std.debug.print("Opcode: 0x{X:0>2}\n", .{rom_ptr[pc]});
-    // std.debug.print("code from &rom_ptr[pc]: 0x{}\n", .{code});
-    // std.debug.print("--\n", .{});
 
-    print("{x:0>4}   {x:0>2}   ", .{ pc, code.* });
+    print("{x:0>4}   {x:0>2}   ", .{ pc.*, opcode });
 
-    if (code.* >= 0x40 and code.* <= 0x7F) {
-        try deassembleMOV(rom_ptr, pc);
+    if (opcode >= 0x40 and opcode <= 0x7F) {
+        try deassembleMOV(state_memory, pc);
         print("\n", .{});
-        return op_bytes;
+        return;
+        // return op_bytes;
     }
 
-    switch (code.*) {
+    // try printFlags(state);
+    _ = state;
+
+    switch (opcode) {
         0x00 => print("NOP", .{}),
         0x01 => {
-            print("LXI   B{x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LXI   B{x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x02 => print("STAX   B", .{}),
@@ -32,7 +44,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x04 => print("INR   B", .{}),
         0x05 => print("DCR   B", .{}),
         0x06 => {
-            print("MVI   B,#0x{x:0>2}", .{rom_ptr[pc + 1]});
+            print("MVI   B,#0x{x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x07 => print("RLC", .{}),
@@ -43,7 +55,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x0c => print("INR   C", .{}),
         0x0d => print("DCR   C", .{}),
         0x0e => {
-            print("MVI   C,#0x{x:x>2}", .{rom_ptr[pc + 1]});
+            print("MVI   C,#0x{x:x>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x0f => {
@@ -51,7 +63,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         },
         0x10 => print("NOP", .{}),
         0x11 => {
-            print("LXI   D{x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LXI   D{x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x12 => print("STAX   D", .{}),
@@ -59,7 +71,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x14 => print("INR   D", .{}),
         0x15 => print("DCR   D", .{}),
         0x16 => {
-            print("LXI   D{x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LXI   D{x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x17 => print("RAL", .{}),
@@ -72,7 +84,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x1c => print("INR   E", .{}),
         0x1d => print("DCR   E", .{}),
         0x1e => {
-            print("MVI   E,#0x{x:x>2}", .{rom_ptr[pc + 1]});
+            print("MVI   E,#0x{x:x>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x1f => print("RAR", .{}),
@@ -80,15 +92,15 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x20 => print("NOP", .{}),
 
         0x21 => {
-            print("LXI   H{x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LXI   H{x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
-        0x22 => print("SHLD   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] }),
-        0x23 => print("INX   D", .{}),
-        0x24 => print("INR   D", .{}),
-        0x25 => print("DCR   D", .{}),
+        0x22 => print("SHLD   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] }),
+        0x23 => print("INX   H", .{}),
+        0x24 => print("INR   H", .{}),
+        0x25 => print("DCR   H", .{}),
         0x26 => {
-            print("MVI   H,#0x{x:0>2}", .{rom_ptr[pc + 1]});
+            print("MVI   H,#0x{x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x27 => print("DAA", .{}),
@@ -101,7 +113,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x2c => print("INR   L", .{}),
         0x2d => print("DCR   L", .{}),
         0x2e => {
-            print("MVI   L,#0x{x:x>2}", .{rom_ptr[pc + 1]});
+            print("MVI   L,#0x{x:x>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x2f => print("CMA", .{}),
@@ -109,18 +121,18 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0x30 => print("NOP", .{}),
 
         0x31 => {
-            print("LXI   SP{x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LXI   SP,{x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x32 => {
-            print("STA   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("STA   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x33 => print("INX   SP", .{}),
         0x34 => print("INR   M", .{}),
         0x35 => print("DCR   M", .{}),
         0x36 => {
-            print("MVI   M{x:0>2}", .{rom_ptr[pc + 1]});
+            print("MVI   M{x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x37 => print("STC", .{}),
@@ -129,14 +141,14 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
 
         0x39 => print("DAD   SP", .{}),
         0x3a => {
-            print("LDA   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("LDA   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0x3b => print("DCX   SP", .{}),
         0x3c => print("INR   A", .{}),
         0x3d => print("DCR   A", .{}),
         0x3e => {
-            print("MVI   A,#0x{x:0>2}", .{rom_ptr[pc + 1]});
+            print("MVI   A,#0x{x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0x3f => print("CMC", .{}),
@@ -219,148 +231,148 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
         0xc0 => print("RNZ", .{}),
         0xc1 => print("POP   B", .{}),
         0xc2 => {
-            print("JNZ   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JNZ   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xc3 => {
-            print("JMP   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JMP   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xc4 => {
-            print("CNZ   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CNZ   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xc5 => print("PUSH  B", .{}),
         0xc6 => {
-            print("ADI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("ADI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xc7 => print("RST   0", .{}),
         0xc8 => print("RZ", .{}),
         0xc9 => print("RET", .{}),
         0xca => {
-            print("JZ    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JZ    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xcb => print("NOP", .{}), // This opcode is not used in 8080
         0xcc => {
-            print("CZ    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CZ    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xcd => {
-            print("CALL  ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CALL  ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xce => {
-            print("ACI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("ACI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xcf => print("RST   1", .{}),
         0xd0 => print("RNC", .{}),
         0xd1 => print("POP   D", .{}),
         0xd2 => {
-            print("JNC   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JNC   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xd3 => {
-            print("OUT   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("OUT   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xd4 => {
-            print("CNC   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CNC   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xd5 => print("PUSH  D", .{}),
         0xd6 => {
-            print("SUI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("SUI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xd7 => print("RST   2", .{}),
         0xd8 => print("RC", .{}),
         0xd9 => print("NOP", .{}), // This opcode is not used in 8080
         0xda => {
-            print("JC    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JC    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xdb => {
-            print("IN    ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("IN    ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xdc => {
-            print("CC    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CC    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xdd => print("NOP", .{}), // This opcode is not used in 8080
         0xde => {
-            print("SBI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("SBI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xdf => print("RST   3", .{}),
         0xe0 => print("RPO", .{}),
         0xe1 => print("POP   H", .{}),
         0xe2 => {
-            print("JPO   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JPO   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xe3 => print("XTHL", .{}),
         0xe4 => {
-            print("CPO   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CPO   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xe5 => print("PUSH  H", .{}),
         0xe6 => {
-            print("ANI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("ANI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xe7 => print("RST   4", .{}),
         0xe8 => print("RPE", .{}),
         0xe9 => print("PCHL", .{}),
         0xea => {
-            print("JPE   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JPE   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xeb => print("XCHG", .{}),
         0xec => {
-            print("CPE   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CPE   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xed => print("NOP", .{}), // This opcode is not used in 8080
         0xee => {
-            print("XRI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("XRI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xef => print("RST   5", .{}),
         0xf0 => print("RP", .{}),
         0xf1 => print("POP   PSW", .{}),
         0xf2 => {
-            print("JP   ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JP   ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xf3 => print("DI", .{}),
         0xf4 => {
-            print("CP    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CP    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xf5 => print("PUSH  PSW", .{}),
         0xf6 => {
-            print("ORI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("ORI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xf7 => print("RST   6", .{}),
         0xf8 => print("RM", .{}),
         0xf9 => print("SPHL", .{}),
         0xfa => {
-            print("JM    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("JM    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xfb => print("EI", .{}),
         0xfc => {
-            print("CM    ${x:0>2}{x:0>2}", .{ rom_ptr[pc + 2], rom_ptr[pc + 1] });
+            print("CM    ${x:0>2}{x:0>2}", .{ state_memory[pc.* + 2], state_memory[pc.* + 1] });
             op_bytes = 3;
         },
         0xfd => print("NOP", .{}), // This opcode is not used in 8080
         0xfe => {
-            print("CPI   ${x:0>2}", .{rom_ptr[pc + 1]});
+            print("CPI   ${x:0>2}", .{state_memory[pc.* + 1]});
             op_bytes = 2;
         },
         0xff => print("RST   7", .{}),
@@ -375,7 +387,7 @@ pub fn deassemblerP(rom_ptr: *const RomData, pc: u16) !u16 {
     }
     print("\n", .{});
 
-    return op_bytes;
+    // return op_bytes;
 }
 
 // NOTE: All of the registers.
@@ -396,14 +408,14 @@ fn getRegisterPair(opcode: u8) RegisterPair {
 
 fn registerToString(reg: Register) []const u8 {
     return switch (reg) {
-        .M => "(HL)",
+        .M => "M(HL)",
         else => @tagName(reg),
     };
 }
 
 // NOTE: Prob have to rework/double check it
-pub fn deassembleMOV(rom_ptr: *const RomData, pc: u16) !void {
-    const opcode = rom_ptr[pc];
+pub inline fn deassembleMOV(state_memory: *const [MemorySize]u8, pc: *const u16) !void {
+    const opcode = state_memory[pc.*];
 
     if (opcode < 0x40 or opcode > 0x7F) {
         return error.InvalidOpcode;
