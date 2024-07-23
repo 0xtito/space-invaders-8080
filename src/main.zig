@@ -46,11 +46,22 @@ pub fn main() !void {
     print("State initialized.\n", .{});
     print("Memory size: {d}\n", .{state.memory.len});
     // defer allocator.free(state.memory);
+    //
 
-    try getRom(&state, "invaders.h", 0x0000);
-    try getRom(&state, "invaders.g", 0x0800);
-    try getRom(&state, "invaders.f", 0x1000);
-    try getRom(&state, "invaders.e", 0x1800);
+    if (true) {
+        try getBin(&state);
+    } else {
+        try getRom(&state, "invaders.h", 0x0000);
+        try getRom(&state, "invaders.g", 0x0800);
+        try getRom(&state, "invaders.f", 0x1000);
+        try getRom(&state, "invaders.e", 0x1800);
+    }
+
+    // try getBin(&state);
+    // try getRom(&state, "invaders.h", 0x0000);
+    // try getRom(&state, "invaders.g", 0x0800);
+    // try getRom(&state, "invaders.f", 0x1000);
+    // try getRom(&state, "invaders.e", 0x1800);
 
     var count: u32 = 0;
     emulation_loop: while (true) {
@@ -95,6 +106,38 @@ pub fn getRom(state: *State8080, file_name: *const [10]u8, offset: u32) !void {
     print("Memory slot: {d}\n", .{offset});
 
     std.mem.copyForwards(u8, state.memory[offset..], buffer[0..bytes_read]);
+}
+
+pub fn getBin(state: *State8080) !void {
+    const cwd = std.fs.cwd();
+
+    var output_dir = try cwd.openDir("src", .{});
+    defer output_dir.close();
+
+    const file = try output_dir.openFile("cpudiag.bin", .{});
+    defer file.close();
+
+    var buffer: [8096]u8 = undefined;
+    const bytes_read = try file.readAll(&buffer);
+
+    print("Successfully read {d} bytes from the file.\n", .{bytes_read});
+
+    std.mem.copyForwards(u8, state.memory[0x100..], buffer[0..bytes_read]);
+
+    // Fix the first instruction to be JMP 0x100
+    state.memory[0] = 0xc3;
+    state.memory[1] = 0;
+    state.memory[2] = 0x01;
+
+    // Fix the stack pointer from 0x6ad to 0x7ad
+    // this 0x06 byte 112 in the code, which is
+    // byte 112 + 0x100 = 368 in memory
+    state.memory[368] = 0x7;
+
+    // Skip DAA test
+    state.memory[0x59c] = 0xc3; // JMP
+    state.memory[0x59d] = 0xc2;
+    state.memory[0x59e] = 0x05;
 }
 
 fn printRomData(data: *const RomData) void {
