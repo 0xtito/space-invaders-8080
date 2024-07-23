@@ -43,13 +43,13 @@ fn logicFlagsA(state: *State8080, ans: *const u8) FlagErrors!void {
     //
     //  - set the flag to true (1)
     //  - else, clear the flag (false || 0)
-    state.cc.z = ((ans.* & 0xff) == 0);
+    state.cc.z = (ans.* == 0);
 
     // INFO: Sign Flag: if bit 7 (MSB) is 1:
     //
     //  - set the flag to true (1)
     //  - else, clear the flag (false || 0)
-    state.cc.s = ((ans.* & 0x80) != 0);
+    state.cc.s = (0x80 == (ans.* & 0x80));
 
     // INFO: Carry Flag:
     //
@@ -116,13 +116,6 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
             const fields = @typeInfo(@TypeOf(res_struct)).Struct.fields;
             // var res: u8 = 0;
             const res: u8 = @field(res_struct, fields[0].name);
-            // inline for (fields) |field| {
-            //     print("field: {s}\n", .{field.name});
-            //     // if (field.name == '0') {
-            //     //     res = @field(res_struct, field.name);
-            //     // }
-            // }
-            // print("res: {any}\n", .{res});
             state.cc.z = (res == 0);
             state.cc.s = (0x80 == (res & 0x80));
             state.cc.p = parity(res, 8);
@@ -192,7 +185,16 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x16 => unimplementedInstruction(state),
         0x17 => unimplementedInstruction(state),
         0x18 => unimplementedInstruction(state),
-        0x19 => unimplementedInstruction(state),
+        // DAD D
+        0x19 => {
+            const hl: u32 = (@as(u32, state.*.h) << 8) | state.*.l;
+            const de: u32 = (@as(u32, state.*.d) << 8) | state.*.e;
+            const res: u32 = hl +% de;
+            state.*.h = @truncate((res & 0xff00) >> 8);
+            state.*.l = @truncate(res & 0xff);
+            state.*.cc.cy = ((res & 0xffff0000) != 0);
+            return .Continue;
+        },
         // LDAX D
         // - Load accumulator indirect
         // - The content of the memory location, whose address is in the register pair rp,
@@ -221,22 +223,37 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         // - The content of the register pair H is incremented by one.
         // - (rh)
         0x23 => {
-            // state.l += 1;
             const res_struct = @addWithOverflow(state.*.l, 1);
             const fields = @typeInfo(@TypeOf(res_struct)).Struct.fields;
             const res: u8 = @field(res_struct, fields[0].name);
-            state.*.l = res;
+            state.l = res;
             if (state.l == 0) {
-                state.h += 1;
+                const h_struct = @addWithOverflow(state.*.h, 1);
+                const h_fields = @typeInfo(@TypeOf(h_struct)).Struct.fields;
+                state.h = @field(h_struct, h_fields[0].name);
             }
             return .Continue;
         },
         0x24 => unimplementedInstruction(state),
         0x25 => unimplementedInstruction(state),
-        0x26 => unimplementedInstruction(state),
+        // MVI H,D8
+        0x26 => {
+            state.h = state.memory[state.pc];
+            state.pc += 1;
+            return .Continue;
+        },
         0x27 => unimplementedInstruction(state),
         0x28 => unimplementedInstruction(state),
-        0x29 => unimplementedInstruction(state),
+        // DAD H
+        // - Add register pair H to H and L
+        0x29 => {
+            const hl: u32 = (@as(u32, state.h) << 8) | state.l;
+            const res: u32 = hl +% hl;
+            state.h = @truncate(res >> 8);
+            state.l = @truncate(res & 0xff);
+            state.cc.cy = ((res & 0xffff0000) != 0);
+            return .Continue;
+        },
         0x2a => unimplementedInstruction(state),
         0x2b => unimplementedInstruction(state),
         0x2c => unimplementedInstruction(state),
@@ -259,7 +276,18 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
             state.*.pc += 2;
             return .Continue;
         },
-        0x32 => unimplementedInstruction(state),
+        // STA adr
+        // - Store accumulator direct
+        // - ( (byte 3) (byte 2) ) <- (A)
+        // - The content of the accumulator (register A) is moved
+        //      to the memory location whose address is specified in
+        //      byte 2 and byte 3 of the instruction.
+        0x32 => {
+            const addr: u16 = (@as(u16, state.memory[state.pc + 1]) << 8) | state.memory[state.pc];
+            state.memory[addr] = state.a;
+            state.pc += 2;
+            return .Continue;
+        },
         0x33 => unimplementedInstruction(state),
         0x34 => unimplementedInstruction(state),
         0x35 => unimplementedInstruction(state),
@@ -277,11 +305,27 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x37 => unimplementedInstruction(state),
         0x38 => unimplementedInstruction(state),
         0x39 => unimplementedInstruction(state),
-        0x3a => unimplementedInstruction(state),
+        // LDA adr
+        // - Load accumulator direct
+        // - (A) <- ((byte 3) (byte 2))
+        // - The content of the memory location, whose address
+        //      is specified in byte 2 and byte 3 of the instruction,
+        //      is moved to the accumulator (register A).
+        0x3a => {
+            const addr: u16 = (@as(u16, state.memory[state.pc + 1]) << 8) | state.memory[state.pc];
+            state.a = state.memory[addr];
+            state.pc += 2;
+            return .Continue;
+        },
         0x3b => unimplementedInstruction(state),
         0x3c => unimplementedInstruction(state),
         0x3d => unimplementedInstruction(state),
-        0x3e => unimplementedInstruction(state),
+        // MVI A,D8
+        0x3e => {
+            state.a = state.memory[state.pc];
+            state.pc += 1;
+            return .Continue;
+        },
         0x3f => unimplementedInstruction(state),
         0x40 => unimplementedInstruction(state),
         0x41 => unimplementedInstruction(state),
@@ -305,7 +349,12 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x53 => unimplementedInstruction(state),
         0x54 => unimplementedInstruction(state),
         0x55 => unimplementedInstruction(state),
-        0x56 => unimplementedInstruction(state),
+        // MOV D,M
+        0x56 => {
+            const addr: u16 = (@as(u16, state.h) << 8) | state.l;
+            state.d = state.memory[addr];
+            return .Continue;
+        },
         0x57 => unimplementedInstruction(state),
         0x58 => unimplementedInstruction(state),
         0x59 => unimplementedInstruction(state),
@@ -313,7 +362,12 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x5b => unimplementedInstruction(state),
         0x5c => unimplementedInstruction(state),
         0x5d => unimplementedInstruction(state),
-        0x5e => unimplementedInstruction(state),
+        // MOV E,H
+        // - Move Register H to Register E
+        0x5e => {
+            state.e = state.h;
+            return .Continue;
+        },
         0x5f => unimplementedInstruction(state),
         0x60 => unimplementedInstruction(state),
         0x61 => unimplementedInstruction(state),
@@ -321,7 +375,12 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x63 => unimplementedInstruction(state),
         0x64 => unimplementedInstruction(state),
         0x65 => unimplementedInstruction(state),
-        0x66 => unimplementedInstruction(state),
+        // MOV H, M
+        0x66 => {
+            const addr: u16 = (@as(u16, state.h) << 8) | state.l;
+            state.h = state.memory[addr];
+            return .Continue;
+        },
         0x67 => unimplementedInstruction(state),
         0x68 => {
             return .Halt;
@@ -332,7 +391,11 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x6c => unimplementedInstruction(state),
         0x6d => unimplementedInstruction(state),
         0x6e => unimplementedInstruction(state),
-        0x6f => unimplementedInstruction(state),
+        // MOV L, A
+        0x6f => {
+            state.l = state.a;
+            return .Continue;
+        },
         0x70 => unimplementedInstruction(state),
         0x71 => unimplementedInstruction(state),
         0x72 => unimplementedInstruction(state),
@@ -351,8 +414,17 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         },
         0x78 => unimplementedInstruction(state),
         0x79 => unimplementedInstruction(state),
-        0x7a => unimplementedInstruction(state),
-        0x7b => unimplementedInstruction(state),
+        // MOV D,A
+        0x7a => {
+            state.d = state.a;
+            return .Continue;
+        },
+        // MOV E,A
+        // - Move register A to register E
+        0x7b => {
+            state.e = state.a;
+            return .Continue;
+        },
         // MOV A,M(HL)
         // - Move memory to register
         // - (r) <- ( (H) (L) )
@@ -361,11 +433,16 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0x7c => {
             const addr: u16 = (@as(u16, state.h) << 8) | state.l;
             state.a = state.memory[addr];
-            // state.a = state.h;
             return .Continue;
         },
         0x7d => unimplementedInstruction(state),
-        0x7e => unimplementedInstruction(state),
+        // MOV A, M
+        // - Move memory to register
+        0x7e => {
+            const addr: u16 = (@as(u16, state.h) << 8) | state.l;
+            state.a = state.memory[addr];
+            return .Continue;
+        },
         0x7f => unimplementedInstruction(state),
         0x80 => unimplementedInstruction(state),
         0x81 => unimplementedInstruction(state),
@@ -406,7 +483,17 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0xa4 => unimplementedInstruction(state),
         0xa5 => unimplementedInstruction(state),
         0xa6 => unimplementedInstruction(state),
-        0xa7 => unimplementedInstruction(state),
+        // ANA D8
+        // - AND immediate
+        0xa7 => {
+            const ans: u8 = state.a & state.a;
+            state.cc.cy = false; // Hardcoding to false since AC is not used
+            state.cc.z = (ans == 0);
+            state.cc.s = (0x80 == (ans & 0x80));
+            state.cc.p = parity(ans, 8);
+            state.a = ans;
+            return .Continue;
+        },
         0xa8 => unimplementedInstruction(state),
         0xa9 => unimplementedInstruction(state),
         0xaa => unimplementedInstruction(state),
@@ -414,7 +501,17 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0xac => unimplementedInstruction(state),
         0xad => unimplementedInstruction(state),
         0xae => unimplementedInstruction(state),
-        0xaf => unimplementedInstruction(state),
+        // XRA A
+        // - Exclusive OR with register A
+        0xaf => {
+            const ans: u8 = state.a ^ state.a;
+            state.cc.cy = false; // Hardcoding to false since AC is not used
+            state.cc.z = (ans == 0);
+            state.cc.s = (0x80 == (ans & 0x80));
+            state.cc.p = parity(ans, 8);
+            state.a = ans;
+            return .Continue;
+        },
         0xb0 => unimplementedInstruction(state),
         0xb1 => unimplementedInstruction(state),
         0xb2 => unimplementedInstruction(state),
@@ -432,7 +529,13 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0xbe => unimplementedInstruction(state),
         0xbf => unimplementedInstruction(state),
         0xc0 => unimplementedInstruction(state),
-        0xc1 => unimplementedInstruction(state),
+        // POP B
+        0xc1 => {
+            state.c = state.memory[state.sp];
+            state.b = state.memory[state.sp + 1];
+            state.sp += 2;
+            return .Continue;
+        },
         // JNZ adr
         // - Jump if not zero
         // - If the zero flag is not set, the program counter is loaded with the
@@ -440,12 +543,7 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         // - If the zero flag is set, the program counter is incremented by 2.
         0xc2 => {
             if (!state.cc.z) {
-                // const ret: u16 = state.pc + 2;
-                // state.memory[state.sp - 1] = @truncate((ret >> 8) & 0xff);
-                // state.memory[state.sp - 2] = @truncate(ret & 0xff);
-                // state.sp -= 2;
-                // state.pc = (@as(u16, state.memory[state.pc + 1]) << 8) | @as(u16, state.memory[state.pc]);
-                call_instruction(state);
+                state.pc = (@as(u16, state.memory[state.pc + 1]) << 8) | state.memory[state.pc];
             } else {
                 state.pc += 2;
             }
@@ -453,16 +551,35 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
             return .Continue;
         },
         0xc3 => {
-            // state.*.pc = @
-            // print("state.memory[state.pc]: {x:0>2}\n", .{state.memory[state.pc]});
-            // print("state.memory[state.pc + 1]: {x:0>2}\n", .{state.memory[state.pc + 1]});
             state.pc = (@as(u16, state.memory[state.pc + 1]) << 8) | @as(u16, state.memory[state.pc]);
-            // print("Jumping to {x:0>4}\n", .{state.pc});
             return .Continue;
         },
         0xc4 => unimplementedInstruction(state),
-        0xc5 => unimplementedInstruction(state),
-        0xc6 => unimplementedInstruction(state),
+        // PUSH B
+        0xc5 => {
+            state.memory[state.sp - 1] = state.b;
+            state.memory[state.sp - 2] = state.c;
+            state.sp -= 2;
+            return .Continue;
+        },
+        // ADI D8
+        // - Add immediate
+        // - (A) <- (A) + (byte 2)
+        // - The content of the second byte of the instruction is added to the
+        //      content of the accumulator (register A). The result is placed in
+        //      the accumulator.
+        0xc6 => {
+            const res_struct = @addWithOverflow(state.a, state.memory[state.pc]);
+            const fields = @typeInfo(@TypeOf(res_struct)).Struct.fields;
+            const res: u8 = @field(res_struct, fields[0].name);
+            state.cc.z = (res == 0);
+            state.cc.s = (0x80 == (res & 0x80));
+            state.cc.p = parity(res, 8);
+            state.cc.cy = (res > 0xff);
+            state.a = res;
+            state.pc += 1;
+            return .Continue;
+        },
         0xc7 => unimplementedInstruction(state),
         0xc8 => unimplementedInstruction(state),
         // RET (Return)
@@ -492,11 +609,32 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0xce => unimplementedInstruction(state),
         0xcf => unimplementedInstruction(state),
         0xd0 => unimplementedInstruction(state),
-        0xd1 => unimplementedInstruction(state),
+        // POP D
+        0xd1 => {
+            state.e = state.memory[state.sp];
+            state.d = state.memory[state.sp + 1];
+            state.sp += 2;
+            return .Continue;
+        },
         0xd2 => unimplementedInstruction(state),
-        0xd3 => unimplementedInstruction(state),
+        // OUT D8
+        // - (data) <- (A)
+        // - The content of the accumulator (register A) is moved to the output
+        // FIX: What is the output? Incrementing for now.
+        0xd3 => {
+            state.pc += 1;
+            return .Continue;
+        },
         0xd4 => unimplementedInstruction(state),
-        0xd5 => unimplementedInstruction(state),
+        // PUSH D
+        // - Push Register Pair
+        // - ( (SP) - 1 ) <- (rh), ( (SP) - 2 ) <- (rl), (SP) <- (SP) - 2
+        0xd5 => {
+            state.memory[state.sp - 1] = state.d;
+            state.memory[state.sp - 2] = state.e;
+            state.sp = state.sp - 2;
+            return .Continue;
+        },
         0xd6 => unimplementedInstruction(state),
         0xd7 => unimplementedInstruction(state),
         0xd8 => unimplementedInstruction(state),
@@ -508,33 +646,112 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
         0xde => unimplementedInstruction(state),
         0xdf => unimplementedInstruction(state),
         0xe0 => unimplementedInstruction(state),
-        0xe1 => unimplementedInstruction(state),
+        // POP H
+        0xe1 => {
+            state.h = state.memory[state.sp + 1];
+            state.l = state.memory[state.sp];
+            state.sp += 2;
+            return .Continue;
+        },
         0xe2 => unimplementedInstruction(state),
         0xe3 => unimplementedInstruction(state),
         0xe4 => unimplementedInstruction(state),
-        0xe5 => unimplementedInstruction(state),
-        0xe6 => unimplementedInstruction(state),
+        0xe5 => {
+            state.memory[state.sp - 1] = state.h;
+            state.memory[state.sp - 2] = state.l;
+            state.sp -= 2;
+            return .Continue;
+        },
+        // ANI D8
+        // - AND immediate
+        // - (A) <- (A) & (byte 2)
+        0xe6 => {
+            const res = state.a & state.memory[state.pc];
+            state.cc.z = (res == 0);
+            state.cc.s = (0x80 == (res & 0x80));
+            state.cc.p = parity(res, 8);
+            state.cc.cy = false;
+            state.a = res;
+            state.pc += 1;
+            return .Continue;
+        },
         0xe7 => unimplementedInstruction(state),
         0xe8 => unimplementedInstruction(state),
         0xe9 => unimplementedInstruction(state),
         0xea => unimplementedInstruction(state),
-        0xeb => unimplementedInstruction(state),
+        // XCHG
+        // - Exchange H and L with D and E
+        // - The contents of the H register is exchanged with
+        //      the contents of the D register.
+        0xeb => {
+            const save1: u8 = state.d;
+            const save2: u8 = state.e;
+            state.d = state.h;
+            state.e = state.l;
+            state.h = save1;
+            state.l = save2;
+            return .Continue;
+        },
         0xec => unimplementedInstruction(state),
         0xed => unimplementedInstruction(state),
         0xee => unimplementedInstruction(state),
         0xef => unimplementedInstruction(state),
         0xf0 => unimplementedInstruction(state),
-        0xf1 => unimplementedInstruction(state),
+        // POP PSW
+        // - Pop process status word
+        // - The contents of the memory location whose address is in the
+        //     register pair SP (stack pointer) are moved to the low-order
+        // - The content of the memory location whose address
+        //      is specified by the content of register SP is used to
+        //      restore the condition flags.
+        // - The content of the memory location whose address is one
+        //      more than the content of register SP is moved to register A.
+        // - The content of register SP is incremented by 2.
+        0xf1 => {
+            state.a = state.memory[state.sp + 1];
+            const psw = state.memory[state.sp];
+            state.cc.z = (0x01 == (psw & 0x01));
+            state.cc.s = (0x02 == (psw & 0x02));
+            state.cc.p = (0x04 == (psw & 0x04));
+            state.cc.cy = (0x08 == (psw & 0x08));
+            state.cc.ac = (0x10 == (psw & 0x10));
+            state.sp += 2;
+            return .Continue;
+        },
         0xf2 => unimplementedInstruction(state),
         0xf3 => unimplementedInstruction(state),
         0xf4 => unimplementedInstruction(state),
-        0xf5 => unimplementedInstruction(state),
+        // PUSH PSW
+        // - Push process status word
+        // - The contents of the accumulator (register A) are moved to
+        //      to the memory location whose address is one less than the
+        //      content of the register SP (stack pointer).
+        // - The contents of the condition flags are assembled
+        //      into a processor status word and the word is moved
+        //      to the memory location whose address is two less
+        //      than the content of register SP.
+        0xf5 => {
+            state.memory[state.sp - 1] = state.a;
+            const psw: u8 = @as(u8, @intFromBool(state.cc.z)) |
+                (@as(u8, @intFromBool(state.cc.s)) << 1) |
+                (@as(u8, @intFromBool(state.cc.p)) << 2) |
+                (@as(u8, @intFromBool(state.cc.cy)) << 3) |
+                (@as(u8, @intFromBool(state.cc.ac)) << 4);
+            state.memory[state.sp - 2] = psw;
+            state.sp -= 2;
+            return .Continue;
+        },
         0xf6 => unimplementedInstruction(state),
         0xf7 => unimplementedInstruction(state),
         0xf8 => unimplementedInstruction(state),
         0xf9 => unimplementedInstruction(state),
         0xfa => unimplementedInstruction(state),
-        0xfb => unimplementedInstruction(state),
+        //  EI
+        // - Enable interrupts
+        0xfb => {
+            state.int_enabled = true;
+            return .Continue;
+        },
         0xfc => unimplementedInstruction(state),
         0xfd => unimplementedInstruction(state),
         // CPI D8
@@ -549,31 +766,15 @@ pub fn emulate8080P(state: *State8080) EmulationResult {
             const res_struct = @subWithOverflow(state.a, state.memory[state.pc]);
             const fields = @typeInfo(@TypeOf(res_struct)).Struct.fields;
             const res: u8 = @field(res_struct, fields[0].name);
-            // state.a = res;
-            // logicFlagsA(state, &res) catch |err| {
-            //     print("Error: {any}\n", .{err});
-            //     return .Unimplemented;
-            // };
             state.cc.z = (res == state.memory[state.pc]);
             state.cc.s = (0x80 == (res & 0x80));
             state.cc.p = parity(res, 8);
             state.cc.cy = (state.a < state.memory[state.pc]);
             state.pc += 1;
-            // state->cc.z = (x == 0);
-            // state->cc.s = (0x80 == (x & 0x80));
-            // state->cc.p = parity(x, 8);
-            // state->cc.cy = (state->a < opcode[1]);
-            // state->pc++;
             return .Continue;
         },
         0xff => unimplementedInstruction(state),
     };
-
-    // print("PC: {x:0>4}\n", .{state.*.pc});
-    // if (result == .Continue) {
-    //     state.*.pc += 1;
-    // }
-    // print("PC: {x:0>4}\n", .{state.*.pc});
 
     return result;
 }
