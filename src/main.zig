@@ -3,6 +3,7 @@ const print = std.debug.print;
 
 const d = @import("disassembler.zig");
 const a = @import("assembler_8080.zig");
+const m = @import("machine/machine.zig");
 
 // NOTE: THis is the max memory size for the 8080
 // May consist of both ROM and RAM
@@ -16,7 +17,34 @@ pub const RomSize = 0x2000; // 2KB = 8192 bytes
 pub const RomData = [8192]u8;
 pub const RomContent = struct { data: RomData, len: usize };
 
-pub const ConditionCodes = struct { z: bool, s: bool, p: bool, cy: bool, ac: bool, pad: u3 };
+pub const ConditionCodes = struct {
+    z: bool,
+    s: bool,
+    p: bool,
+    cy: bool,
+    ac: bool,
+    pad: u3,
+
+    pub fn pack(self: ConditionCodes) u8 {
+        return @as(u8, @intFromBool(self.z)) |
+            (@as(u8, @intFromBool(self.s)) << 1) |
+            (@as(u8, @intFromBool(self.p)) << 2) |
+            (@as(u8, @intFromBool(self.cy)) << 3) |
+            (@as(u8, @intFromBool(self.ac)) << 4) |
+            (@as(u8, self.pad) << 5);
+    }
+
+    pub fn unpack(value: u8) ConditionCodes {
+        return ConditionCodes{
+            .z = (value & 0b00000001) != 0,
+            .s = (value & 0b00000010) != 0,
+            .p = (value & 0b00000100) != 0,
+            .cy = (value & 0b00001000) != 0,
+            .ac = (value & 0b00010000) != 0,
+            .pad = @truncate(value >> 5),
+        };
+    }
+};
 
 // NOTE: This is the state of the 8080 CPU
 // - a: 8-bit accumulator register
@@ -38,50 +66,54 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
-    const allocator = gpa.allocator();
-    _ = allocator;
-
-    var state: State8080 = try initState8080();
-
-    print("State initialized.\n", .{});
-    print("Memory size: {d}\n", .{state.memory.len});
-    // defer allocator.free(state.memory);
-    //
+    // const allocator = gpa.allocator();
+    // _ = allocator;
 
     if (true) {
-        try getBin(&state);
+        try test_machine();
     } else {
-        try getRom(&state, "invaders.h", 0x0000);
-        try getRom(&state, "invaders.g", 0x0800);
-        try getRom(&state, "invaders.f", 0x1000);
-        try getRom(&state, "invaders.e", 0x1800);
-    }
+        var state: State8080 = try initState8080();
 
-    // try getBin(&state);
-    // try getRom(&state, "invaders.h", 0x0000);
-    // try getRom(&state, "invaders.g", 0x0800);
-    // try getRom(&state, "invaders.f", 0x1000);
-    // try getRom(&state, "invaders.e", 0x1800);
+        print("State initialized.\n", .{});
+        print("Memory size: {d}\n", .{state.memory.len});
+        // defer allocator.free(state.memory);
+        //
 
-    var count: u32 = 0;
-    emulation_loop: while (true) {
-        switch (a.emulate8080P(&state)) {
-            .Continue => {
-                count += 1;
-                continue :emulation_loop;
-            },
-            .Halt => {
-                print("Halted.\n", .{});
-                print("Instructions executed: {d}\n", .{count});
-                break :emulation_loop;
-            },
-            .Unimplemented => {
-                print("Unimplemented instruction.\n", .{});
-                print("Instructions executed: {d}\n", .{count});
-                break :emulation_loop;
-            },
+        if (true) {
+            try getBin(&state);
+        } else {
+            try getRom(&state, "invaders.h", 0x0000);
+            try getRom(&state, "invaders.g", 0x0800);
+            try getRom(&state, "invaders.f", 0x1000);
+            try getRom(&state, "invaders.e", 0x1800);
+        }
+
+        var count: u32 = 0;
+        emulation_loop: while (true) {
+            switch (a.emulate8080P(&state)) {
+                .Continue => {
+                    count += 1;
+                    continue :emulation_loop;
+                },
+                .Halt => {
+                    print("Halted.\n", .{});
+                    print("Instructions executed: {d}\n", .{count});
+                    break :emulation_loop;
+                },
+                .Unimplemented => {
+                    print("Unimplemented instruction.\n", .{});
+                    print("Instructions executed: {d}\n", .{count});
+                    break :emulation_loop;
+                },
+            }
         }
     }
+}
+
+fn test_machine() !void {
+    var machine: m.Machine = try m.initMachine();
+
+    machine.doCpu();
 }
 
 pub fn getRom(state: *State8080, file_name: *const [10]u8, offset: u32) !void {
